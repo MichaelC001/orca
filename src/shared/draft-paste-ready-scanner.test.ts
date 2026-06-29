@@ -38,6 +38,16 @@ describe('createDraftPasteReadyScanner', () => {
       ).toEqual({ ready: true, armQuietTimer: false })
     })
 
+    it('detects a bracketed-paste handshake split across a chunk boundary', () => {
+      // Why: the pre-handshake `recent` ring must reassemble a \x1b[?2004h that
+      // straddles two PTY packets, or both quiet-window arming and cursor-gated
+      // readiness break for fragmented startup output.
+      const scanner = createDraftPasteReadyScanner('render-cursor-after-bracketed-paste')
+      expect(scanner.observe('\x1b[?20')).toEqual({ ready: false, armQuietTimer: false })
+      expect(scanner.observe('04h')).toEqual({ ready: false, armQuietTimer: true })
+      expect(scanner.observe(SHOW_CURSOR)).toEqual({ ready: true, armQuietTimer: false })
+    })
+
     it('detects show-cursor split across a later chunk boundary', () => {
       const scanner = createDraftPasteReadyScanner('render-cursor-after-bracketed-paste')
       scanner.observe(DECSET_BRACKETED_PASTE)
