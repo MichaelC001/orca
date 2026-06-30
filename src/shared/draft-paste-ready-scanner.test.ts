@@ -18,12 +18,17 @@ describe('createDraftPasteReadyScanner', () => {
 
     it('does not fire on bracketed paste alone, then fires once show-cursor arrives', () => {
       const scanner = createDraftPasteReadyScanner('render-cursor-after-bracketed-paste')
-      // Why: opencode enables bracketed paste ~2s before its composer mounts;
-      // the cursor must gate delivery, but the quiet-window must still arm.
-      expect(scanner.observe(DECSET_BRACKETED_PASTE)).toEqual({ ready: false, armQuietTimer: true })
+      // Why: opencode enables bracketed paste ~1.5-2s before its composer mounts
+      // and stays SILENT in between. The cursor gates delivery and must NOT arm
+      // the quiet window, which would otherwise fire during that silent gap and
+      // paste before the composer exists.
+      expect(scanner.observe(DECSET_BRACKETED_PASTE)).toEqual({
+        ready: false,
+        armQuietTimer: false
+      })
       expect(scanner.observe('startup banner output')).toEqual({
         ready: false,
-        armQuietTimer: true
+        armQuietTimer: false
       })
       expect(scanner.observe(SHOW_CURSOR)).toEqual({ ready: true, armQuietTimer: false })
     })
@@ -40,11 +45,11 @@ describe('createDraftPasteReadyScanner', () => {
 
     it('detects a bracketed-paste handshake split across a chunk boundary', () => {
       // Why: the pre-handshake `recent` ring must reassemble a \x1b[?2004h that
-      // straddles two PTY packets, or both quiet-window arming and cursor-gated
-      // readiness break for fragmented startup output.
+      // straddles two PTY packets, or cursor-gated readiness breaks for
+      // fragmented startup output.
       const scanner = createDraftPasteReadyScanner('render-cursor-after-bracketed-paste')
       expect(scanner.observe('\x1b[?20')).toEqual({ ready: false, armQuietTimer: false })
-      expect(scanner.observe('04h')).toEqual({ ready: false, armQuietTimer: true })
+      expect(scanner.observe('04h')).toEqual({ ready: false, armQuietTimer: false })
       expect(scanner.observe(SHOW_CURSOR)).toEqual({ ready: true, armQuietTimer: false })
     })
 
@@ -52,17 +57,18 @@ describe('createDraftPasteReadyScanner', () => {
       const scanner = createDraftPasteReadyScanner('render-cursor-after-bracketed-paste')
       scanner.observe(DECSET_BRACKETED_PASTE)
       // The escape sequence is split mid-bytes across two separate chunks.
-      expect(scanner.observe('render noise \x1b[?')).toEqual({ ready: false, armQuietTimer: true })
+      expect(scanner.observe('render noise \x1b[?')).toEqual({ ready: false, armQuietTimer: false })
       expect(scanner.observe('25h')).toEqual({ ready: true, armQuietTimer: false })
     })
 
-    it('keeps arming the quiet-window fallback when show-cursor never arrives', () => {
+    it('never arms the quiet window during the silent pre-composer gap', () => {
       const scanner = createDraftPasteReadyScanner('render-cursor-after-bracketed-paste')
       scanner.observe(DECSET_BRACKETED_PASTE)
-      // Every subsequent noisy chunk must re-arm the fallback (no early-return
-      // that would starve it), so delivery is never worse than the default.
+      // Why: opencode is silent here; arming the quiet window would fire before
+      // the composer mounts and pre-empt the cursor signal (the original bug).
+      // Delivery waits for show-cursor, bounded by the caller's hard timeout.
       for (let i = 0; i < 5; i += 1) {
-        expect(scanner.observe(`setup output ${i}`)).toEqual({ ready: false, armQuietTimer: true })
+        expect(scanner.observe(`setup output ${i}`)).toEqual({ ready: false, armQuietTimer: false })
       }
     })
 
@@ -71,7 +77,7 @@ describe('createDraftPasteReadyScanner', () => {
       // \x1b[?25l (hide) must not be mistaken for \x1b[?25h (show).
       expect(scanner.observe(`${DECSET_BRACKETED_PASTE}${HIDE_CURSOR}`)).toEqual({
         ready: false,
-        armQuietTimer: true
+        armQuietTimer: false
       })
     })
 
@@ -81,7 +87,7 @@ describe('createDraftPasteReadyScanner', () => {
       expect(scanner.observe(SHOW_CURSOR)).toEqual({ ready: false, armQuietTimer: false })
       expect(scanner.observe(DECSET_BRACKETED_PASTE)).toEqual({
         ready: false,
-        armQuietTimer: true
+        armQuietTimer: false
       })
     })
   })

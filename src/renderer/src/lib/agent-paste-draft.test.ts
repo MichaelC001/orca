@@ -261,7 +261,45 @@ describe('pasteDraftWhenAgentReady', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('falls back to the quiet window for opencode when show-cursor never arrives', async () => {
+  it('does not paste on the quiet window for opencode (it never arms one)', async () => {
+    // Why: opencode is silent for ~1.5-2s between enabling bracketed paste and
+    // mounting its composer. A quiet window would fire during that gap and paste
+    // before the composer exists (the original bug), so the cursor signal must
+    // not arm one. With process inspection failing, delivery times out instead.
+    testState.inspectRuntimeTerminalProcess.mockResolvedValue(null)
+    const onTimeout = vi.fn()
+    const promise = pasteDraftWhenAgentReady({
+      tabId: 'tab-1',
+      content: ISSUE_URL,
+      agent: 'opencode',
+      onTimeout
+    })
+    await flushMicrotasks()
+
+    testState.ptyObserver?.(DECSET_BRACKETED_PASTE)
+    await flushMicrotasks()
+
+    // Quiet-window duration elapses with no show-cursor: must NOT paste.
+    await vi.advanceTimersByTimeAsync(1500)
+    await flushMicrotasks()
+    expect(testState.sendRuntimePtyInputVerified).not.toHaveBeenCalled()
+
+    // Only the hard timeout (and failed process check) resolves it — to false.
+    await vi.advanceTimersByTimeAsync(8000)
+    await flushMicrotasks(5)
+    await vi.advanceTimersByTimeAsync(1000)
+    await expect(promise).resolves.toBe(false)
+    expect(testState.sendRuntimePtyInputVerified).not.toHaveBeenCalled()
+    expect(onTimeout).toHaveBeenCalledTimes(1)
+  })
+
+  it('best-effort pastes for opencode at the hard timeout when its process is running', async () => {
+    // Why: with no quiet window, the hard-timeout process-ownership check is the
+    // backstop if show-cursor is somehow missed — same model as Codex.
+    testState.inspectRuntimeTerminalProcess.mockResolvedValue({
+      foregroundProcess: 'opencode',
+      hasChildProcesses: false
+    })
     const promise = pasteDraftWhenAgentReady({
       tabId: 'tab-1',
       content: ISSUE_URL,
@@ -270,13 +308,7 @@ describe('pasteDraftWhenAgentReady', () => {
     await flushMicrotasks()
 
     testState.ptyObserver?.(DECSET_BRACKETED_PASTE)
-    await flushMicrotasks()
-    expect(testState.sendRuntimePtyInputVerified).not.toHaveBeenCalled()
-
-    await vi.advanceTimersByTimeAsync(1499)
-    expect(testState.sendRuntimePtyInputVerified).not.toHaveBeenCalled()
-
-    await vi.advanceTimersByTimeAsync(1)
+    await vi.advanceTimersByTimeAsync(8000)
 
     await expect(promise).resolves.toBe(true)
     expect(testState.sendRuntimePtyInputVerified).toHaveBeenCalledWith(

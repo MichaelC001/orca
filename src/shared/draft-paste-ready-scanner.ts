@@ -29,10 +29,14 @@ export type DraftPasteReadyScanResult = {
  *
  * Per agent signal:
  *   - `codex-composer-prompt`: ready when the `›` glyph renders after DECSET
- *     2004; never falls back to a quiet window (`armQuietTimer` stays false).
+ *     2004; never arms the quiet window (`armQuietTimer` stays false).
  *   - `render-cursor-after-bracketed-paste`: ready when DECTCEM show-cursor
- *     (`\x1b[?25h`) renders after DECSET 2004; on a miss it still arms the
- *     quiet-window fallback so delivery is never worse than the default.
+ *     (`\x1b[?25h`) renders after DECSET 2004. Like Codex it does NOT arm the
+ *     quiet window: opencode stays silent for ~1.5-2s between enabling
+ *     bracketed paste and mounting its composer, so a quiet window would fire
+ *     during that gap and pre-empt the marker. opencode re-emits show-cursor on
+ *     every render frame once mounted, so the marker is effectively guaranteed;
+ *     the caller's hard timeout is the backstop if it never appears.
  *   - `render-quiet-after-bracketed-paste` (default): no signal marker; arms the
  *     quiet window once DECSET 2004 is seen.
  *
@@ -77,13 +81,14 @@ export function createDraftPasteReadyScanner(readySignal: DraftPasteReadySignal)
         }
         postHandshakeRecent = (postHandshakeRecent + data).slice(-512)
       }
-      // Why: Codex resolves only on its composer glyph and must never fall back
-      // to a quiet window; every other signal arms the quiet window once
-      // bracketed paste is enabled.
-      if (readySignal === 'codex-composer-prompt') {
-        return { ready: false, armQuietTimer: false }
-      }
-      return { ready: false, armQuietTimer: saw2004 }
+      // Why: marker-based signals (Codex glyph, opencode show-cursor) must NOT
+      // arm the quiet window. opencode goes silent for ~1.5-2s between enabling
+      // bracketed paste and mounting its composer, so a quiet window would fire
+      // during that gap — before the composer exists — and pre-empt the marker.
+      // These signals wait for their marker, bounded only by the caller's hard
+      // timeout (and the caller's best-effort process-ownership paste after it).
+      // Only the default signal, which has no marker, uses the quiet window.
+      return { ready: false, armQuietTimer: signalMarker === null && saw2004 }
     }
   }
 }
