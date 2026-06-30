@@ -162,6 +162,12 @@ function resumeTerminalVisibilityHeavy(manager: PaneManager, isActive: boolean):
   } else {
     fitPanes(manager)
   }
+  // Why: a worktree (surface) switch can re-show a pane whose container size
+  // did not change while hidden, so safeFit early-returns and DOM-renderer
+  // panes (no WebGL repaint) keep a stale/garbled canvas until a manual zoom
+  // forces a refit+refresh. Force the repaint here, matching the window-wake
+  // path, so switching workspaces renders correctly without the zoom dance.
+  manager.refreshAllPanes?.()
 }
 
 function enforceTerminalViewportIntents(manager: PaneManager): void {
