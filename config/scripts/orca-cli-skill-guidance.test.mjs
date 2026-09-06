@@ -93,7 +93,9 @@ describe('orca CLI skill guidance', () => {
     const skill = readSkill()
 
     expect(skill).toContain('ORCA skills get orca-cli --reference references/<file>.md')
-    expect(skill).toContain('If the CLI rejects `--reference`, run `ORCA skills get orca-cli --full`')
+    expect(skill).toContain(
+      'If the CLI rejects `--reference`, run `ORCA skills get orca-cli --full`'
+    )
     for (const reference of [
       'references/browser.md',
       'references/automations.md',
